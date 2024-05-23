@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>地图展示</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta http-equiv="X-UA-Compatible">
+    <style>
+    body,
+    html,
+    #container {
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        font-family: "微软雅黑";
+    }
+    .info {
+        z-index: 999;
+        width: auto;
+        min-width: 22rem;
+        padding: .75rem 1.25rem;
+        margin-left: 1.25rem;
+        position: fixed;
+        top: 1rem;
+        background-color: #fff;
+        border-radius: .25rem;
+        font-size: 14px;
+        color: #666;
+        box-shadow: 0 2px 6px 0 rgba(27, 142, 236, 0.5);
+    }
+    </style>
+    <script src="https://api.map.baidu.com/api?type=webgl&v=1.0&ak=mXZNANV4Yilx0mDOyJ9P4SxDxOkiDwRw"></script>
+</head>
+<body>
+    <div id="container"></div>
+</body>
+</html>
+<script>
+var map = new BMapGL.Map('container'); // 创建Map实例
+map.centerAndZoom(new BMapGL.Point(122.1, 29.9), 11); // 初始化地图,设置中心点坐标和地图级别
+map.enableScrollWheelZoom(true); // 开启鼠标滚轮缩放
+
+/*百度坐标转换*/
+function gcj02_bd09(pos){
+    
+    PI=3.1415926535897932384626
+    baiduFactor = (PI * 3000.0) / 180.0;
+    z = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1]) + 0.00002 * Math.sin(pos[1] * baiduFactor);
+	theta = Math.atan2(pos[1], pos[0]) + 0.000003 * Math.cos(pos[0] * baiduFactor);
+	var BD={}
+    BD[0] = z * Math.cos(theta) + 0.0065;
+	BD[1] = z * Math.sin(theta) + 0.006;
+    return BD;
+}
+
+/*地图更新为真北向上平面显示*/
+function repoint(pos){
+    map.setHeading(0);   //设置地图旋转角度
+    map.setTilt(0);       //设置地图的倾斜角度
+    map.centerAndZoom(new BMapGL.Point(pos[0],pos[1]),12);
+}
+
+/*有高度的原点标记：blue*/
+function point(pos){
+    var npos=gcj02_bd09(pos);
+    var point = new BMapGL.Point(npos[0], npos[1]);   
+    var marker=new BMapGL.Marker3D(point,0,{
+        size: 10,
+        shape: BMAP_SHAPE_CIRCLE,
+        fillColor: 'rgba(0,0,255,1)',
+        fillOpacity: 0.5
+    });
+    map.addOverlay(marker);
+    map.centerAndZoom(new BMapGL.Point(npos[0],npos[1]),19);
+}
+
+/*有高度的原点标记：red*/
+function makerpoint(pos){
+    var npos=gcj02_bd09(pos);
+    var point = new BMapGL.Point(npos[0], npos[1]);   
+    /*
+    var circle = new BMapGL.Circle(point,8);        // 创建标注
+    circle.setStrokeColor("rgba(255,0,0,1)");
+    circle.setStrokeWeight(0);
+    circle.setStrokeOpacity(0);
+    circle.setFillColor("rgba(255,0,0,1)");
+    circle.setFillOpacity(1.0);
+    circle.setZIndex(20);
+    map.addOverlay(circle);
+    map.centerAndZoom(new BMapGL.Point(pos[0],pos[1]),17)
+    */
+    
+    var marker=new BMapGL.Marker3D(point,0,{
+        size: 10,
+        shape: BMAP_SHAPE_CIRCLE,
+        fillColor: 'rgba(255,0,0,1)',
+        fillOpacity: 1.0
+    });
+    map.addOverlay(marker);
+    map.centerAndZoom(new BMapGL.Point(npos[0],npos[1]),19);
+    
+}
+
+/*清空地图的所有覆盖物*/
+function clearmap(){
+    map.clearOverlays();
+}
+
+/*绘制船舶和信息窗(实时展示条件下)*/
+function drawship(pos,theta,ship_property,color){
+    var npos=gcj02_bd09(pos);
+    lon=npos[0],lat=npos[1];
+    ang=theta/180.0*PI;
+    pt=0.01
+    var polygon = new BMapGL.Polygon([
+        //new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon+pt*Math.sin(ang),lat+pt*Math.cos(ang)),
+        new BMapGL.Point(lon+pt*0.3*Math.cos(ang),lat-pt*0.3*Math.sin(ang)),
+        new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon-pt*0.3*Math.cos(ang),lat+pt*0.3*Math.sin(ang)),
+    ], {strokeColor:"blue", strokeWeight:0, strokeOpacity:0,fillColor:color,fillOpacity:0.8});
+    polygon.id=Number(ship_property[2]);//将MMSI作为id赋给多边形
+    var opts = {
+	    width : 160,     // 信息窗口宽度
+	    height: 100,     // 信息窗口高度
+	    title : `MMSI:${ship_property[2]}`,  // 信息窗口标题
+    }
+	
+    var infoWindow = new BMapGL.InfoWindow(`经度:${ship_property[0]}\n纬度:${ship_property[1]}\n 
+                                            船长:${ship_property[3]}\n船宽:${ship_property[4]}\n
+                                            航向:${ship_property[5]}\n航速${ship_property[6]}`, opts);  // 创建信息窗口对象 
+	
+    polygon.clickEvent=function(type){
+        map.openInfoWindow(infoWindow,new BMapGL.Point(npos[0],npos[1]));//开启信息窗口
+    }
+    polygon.addEventListener("click", function(){          
+		polygon.clickEvent(); //开启信息窗口
+	}); 
+    map.addOverlay(polygon)
+}
+
+/*绘制船舶和信息窗(冲突概率条件下)*/
+function drawship_conflict(pos,theta,ship_property,color){
+    var npos=gcj02_bd09(pos);
+    lon=npos[0],lat=npos[1];
+    ang=theta/180.0*PI;
+    pt=0.01
+    var polygon = new BMapGL.Polygon([
+        //new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon+pt*Math.sin(ang),lat+pt*Math.cos(ang)),
+        new BMapGL.Point(lon+pt*0.3*Math.cos(ang),lat-pt*0.3*Math.sin(ang)),
+        new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon-pt*0.3*Math.cos(ang),lat+pt*0.3*Math.sin(ang)),
+    ], {strokeColor:"black", strokeWeight:0, strokeOpacity:0,fillColor:color,fillOpacity:0.8});
+    polygon.id=Number(ship_property[2]);//将MMSI作为id赋给多边形
+    var opts = {
+	    width : 160,     // 信息窗口宽度
+	    height: 100,     // 信息窗口高度
+	}
+	
+    // 高冲突风险
+    if(ship_property[7]>0.5){
+        infocontext=
+        `<b style="color:red">冲突概率:${ship_property[7].toFixed(4)}</b>
+        <br>冲突关系:${ship_property[8]}
+        <br>经度:${ship_property[0]} 
+        <br>纬度:${ship_property[1]}
+        <br>船长:${ship_property[3]} 船宽:${ship_property[4]}
+        <br>航向:${ship_property[5]} 航速${ship_property[6]}
+        `;
+        var infoWindow = new BMapGL.InfoWindow(infocontext, opts);  // 创建信息窗口对象 
+        infoWindow.setTitle(`<b style="color:black;background-color:rgba(255,0,0,0.3)">MMSI:${ship_property[2]}</b>`);
+    }
+    //中冲突风险
+    else if(ship_property[7]>0&&ship_property[7]<=0.5){
+        infocontext=
+        `<b style="color:rgba(255,128,0,1.0)">冲突概率:${ship_property[7].toFixed(4)}</b>
+        <br>冲突关系:${ship_property[8]}
+        <br>经度:${ship_property[0]} 
+        <br>纬度:${ship_property[1]}
+        <br>船长:${ship_property[3]} 船宽:${ship_property[4]}
+        <br>航向:${ship_property[5]} 航速${ship_property[6]}
+        `;
+        var infoWindow = new BMapGL.InfoWindow(infocontext, opts);  // 创建信息窗口对象 
+        infoWindow.setTitle(`<b style="color:black;background-color:rgba(255,255,0,0.3)">MMSI:${ship_property[2]}</b>`);
+    }
+    // 低/无冲突风险
+    else{
+        infocontext=
+        `经度:${ship_property[0]} 
+         <br>纬度:${ship_property[1]}
+         <br>船长:${ship_property[3]} 船宽:${ship_property[4]}
+         <br>航向:${ship_property[5]} 航速${ship_property[6]}
+        `;
+        var infoWindow = new BMapGL.InfoWindow(infocontext, opts);  // 创建信息窗口对象 
+        infoWindow.setTitle(`<b style="color:black;background-color:rgba(0,255,0,0.5)">MMSI:${ship_property[2]}</b>`);
+    }                                    
+    
+    polygon.clickEvent=function(type){
+        map.openInfoWindow(infoWindow,new BMapGL.Point(npos[0],npos[1]));//开启信息窗口
+    }
+    
+    polygon.addEventListener("click", function(){          
+		polygon.clickEvent(); //开启信息窗口
+	}); 
+    map.addOverlay(polygon)
+}
+
+/*测试用单点标记*/
+function test(){
+    lon=121.1,lat=29.9,ang=90;pt=0.01;
+    var polygon = new BMapGL.Polygon([
+        //new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon+pt*Math.sin(ang),lat+pt*Math.cos(ang)),
+        new BMapGL.Point(lon+pt*0.3*Math.cos(ang),lat-pt*0.3*Math.sin(ang)),
+        new BMapGL.Point(lon,lat),
+        new BMapGL.Point(lon-pt*0.3*Math.cos(ang),lat+pt*0.3*Math.sin(ang)),
+    ], {strokeColor:"blue", strokeWeight:0, strokeOpacity:0,fillColor:"blue",fillOpacity:0.8});
+    var opts = {
+	    width : 160,     // 信息窗口宽度
+	    height: 100,     // 信息窗口高度
+	    title : `MMSI:`  // 信息窗口标题
+	}
+	
+    var infoWindow = new BMapGL.InfoWindow(" ", opts); 
+    map.addOverlay(polygon)
+}
+
+/*随地图层级变换进行船舶图形重绘*/
+function resetpolygon(polygon,zoomnum){
+    lon=polygon.getPath()[2].lng;
+    lat=polygon.getPath()[2].lat;
+    x=polygon.getPath()[0].lng;
+    y=polygon.getPath()[0].lat;
+    x=x-lon;y=y-lat;
+    ang=Math.atan2(x,y);
+    pt=0.01*Math.pow(0.75,zoomnum-11);//改写比例
+    polygon.setPositionAt(0,new BMapGL.Point(lon+pt*Math.sin(ang),lat+pt*Math.cos(ang)));
+    polygon.setPositionAt(1,new BMapGL.Point(lon+pt*0.3*Math.cos(ang),lat-pt*0.3*Math.sin(ang)));
+    polygon.setPositionAt(3,new BMapGL.Point(lon-pt*0.3*Math.cos(ang),lat+pt*0.3*Math.sin(ang)));
+}
+
+/*转到指定MMSI号的船舶处并显示信息窗*/
+function flytoship(pos,MMSI){
+    npos=gcj02_bd09(pos);
+    point=new BMapGL.Point(npos[0],npos[1]);
+    map.centerAndZoom(point,14);
+
+    overlays=map.getOverlays();
+    polygons=[]
+    for(i=0;i<overlays.length;i++)
+        if(overlays[i] instanceof BMapGL.Polygon && overlays[i].id==Number(MMSI))
+            overlays[i].clickEvent()
+            
+}
+
+/*动态群组绘制*/
+function drawgroups(i,Si,risk,areas,mmsilist,color){
+    //群组绘制区域处理
+    var lonmax=areas[0];
+    var lonmin=areas[1];
+    var latmax=areas[2];
+    var latmin=areas[3];
+    lonmax=gcj02_bd09([lonmax,latmax])[0]
+    latmax=gcj02_bd09([lonmax,latmax])[1]
+    lonmin=gcj02_bd09([lonmin,latmin])[0]
+    latmin=gcj02_bd09([lonmin,latmin])[1]
+    console.log(mmsilist)
+    
+    //群组多边形对象
+    var polygon = new BMapGL.Polygon([
+        new BMapGL.Point(lonmax+0.01,latmax+0.01),
+        new BMapGL.Point(lonmax+0.01,latmin-0.01),
+        new BMapGL.Point(lonmin-0.01,latmin-0.01),
+        new BMapGL.Point(lonmin-0.01,latmax+0.01),
+    ], {strokeColor:color, strokeWeight:1, strokeOpacity:1.0,fillColor:"white",fillOpacity:0.0});
+    
+    //群组多边形属性和id赋予
+    polygon.type="Group"
+    polygon.id=i//将簇编号赋予多边形
+
+    //从Si中提取簇内船舶索引和风险值
+    ship_index=Object.keys(Si);
+    ship_shapley=Object.values(Si);
+    sumSi=0;for(t=0;t<ship_shapley.length;t++) sumSi+=ship_shapley[t]//归一化被除数
+    riskcontext=``;
+    for(t=0;t<ship_index.length;t++)
+        if(Si[ship_index[t]]>0)
+            riskcontext+=`<b style="color:red">${mmsilist[t]}:${(Si[ship_index[t]]/sumSi*100).toFixed(2)}%</b><br>`
+    for(t=0;t<ship_index.length;t++)
+        if(Si[ship_index[t]]==0)
+            riskcontext+=`${mmsilist[t]}:${(Si[ship_index[t]]*100).toFixed(2)}%<br>`
+    
+    //群组信息窗口
+    var opts = {
+	    width : 160,     // 信息窗口宽度
+	    height: 100,     // 信息窗口高度
+	    title : `簇编号: ${i}`  // 信息窗口标题
+	}
+	if(risk>0)
+        infocontext=`
+        簇风险:<b style="color:red">${risk.toFixed(4)}</b><br>
+        簇内船舶风险贡献:<br>
+        ${riskcontext}
+        `;
+    else
+    infocontext=`
+        簇风险:<b style="color:green">${risk.toFixed(4)}</b><br>
+        簇内船舶风险贡献:<br>
+        ${riskcontext}
+        `;
+    var infoWindow = new BMapGL.InfoWindow(infocontext, opts); 
+    polygon.clickEvent=function(type){
+        map.openInfoWindow(infoWindow,new BMapGL.Point(lonmax/2+lonmin/2,latmax/2+latmin/2));//开启信息窗口
+    }
+    map.addOverlay(polygon)
+}
+
+/*转移到动态群组信息框*/
+function flytogroup(index){
+    overlays=map.getOverlays();
+    polygons=[]
+    for(i=0;i<overlays.length;i++)
+        if(overlays[i] instanceof BMapGL.Polygon && overlays[i].type=="Group" && overlays[i].id==index)
+            overlays[i].clickEvent()
+    
+}
+
+/*地图事件监听器：监听地图层级变化*/
+map.addEventListener("zoomend",function(e){
+    var zoomnum=map.getZoom();
+    console.log(zoomnum);
+    overlays=map.getOverlays();
+    polygons=[]
+    for(i=0;i<overlays.length;i++)
+        if(overlays[i] instanceof BMapGL.Polygon)
+            polygons.push(overlays[i]);
+    for(i=0;i<polygons.length;i++)
+        if(polygons[i].type!="Group")
+            resetpolygon(polygons[i],zoomnum);
+});
+</script>
